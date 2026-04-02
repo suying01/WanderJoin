@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Data outputs
+data/raw/**
+data/clean/**
+!data/raw/.gitkeep
+!data/clean/.gitkeep
+
+# Reports and logs
+reports/*.json
+reports/*.log
+*.log
+
+# Local databases
+*.duckdb
+*.dump
+
+# Env files
+.env
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/

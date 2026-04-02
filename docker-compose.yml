@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: amazon-reviews-postgres
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: amazon_reviews
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
