@@ -57,7 +57,7 @@ powershell -ExecutionPolicy Bypass -File scripts/run_data_lead_pipeline.ps1 -Sca
 What this does:
 - Generates TPC-H SF5 raw files
 - Cleans `.tbl` files
-- Validates data integrity
+- Validates data integrity (PK/FK and generated-vs-cleaned row count consistency)
 - Loads data to Docker PostgreSQL
 - Runs row-count verification
 
@@ -79,7 +79,7 @@ python scripts/generate_tpch_duckdb.py --sf 5 --out-dir data/raw/sf5 --force
 python scripts/clean_tpch.py --input-dir data/raw/sf5 --output-dir data/clean/sf5 --force
 
 # 4) Validate cleaned files
-python scripts/validate_tpch.py --input-dir data/clean/sf5 --report reports/validation_sf5.json
+python scripts/validate_tpch.py --input-dir data/clean/sf5 --report reports/validation_sf5.json --metadata data/raw/sf5/generation_metadata.json
 
 # 5) Load into Docker PostgreSQL
 powershell -ExecutionPolicy Bypass -File scripts/load_to_postgres.ps1 -Scale 5

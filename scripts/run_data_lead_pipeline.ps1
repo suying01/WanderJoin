@@ -6,6 +6,22 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Invoke-CheckedCommand {
+    param(
+        [scriptblock]$Command,
+        [string]$Description
+    )
+
+    & $Command
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Description failed with exit code $LASTEXITCODE"
+    }
+}
+
+$projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+Push-Location $projectRoot
+try {
+
 if (-not (Test-Path ".env")) {
     Copy-Item ".env.example" ".env"
     Write-Host "Created .env from .env.example"
@@ -20,8 +36,14 @@ foreach ($line in $envFile) {
     }
 }
 
+$venvPython = Join-Path $projectRoot "venv\Scripts\python.exe"
+$pythonExe = if (Test-Path $venvPython) { $venvPython } else { "python" }
+Write-Host "Using Python interpreter: $pythonExe"
+
 Write-Host "Installing Python dependencies..."
-pip install -r requirements.txt
+Invoke-CheckedCommand -Description "Dependency installation" -Command {
+    & $pythonExe -m pip install -r requirements.txt
+}
 
 $hasDump = -not [string]::IsNullOrWhiteSpace($DumpFile)
 if ($hasDump -and -not (Test-Path $DumpFile)) {
@@ -30,7 +52,9 @@ if ($hasDump -and -not (Test-Path $DumpFile)) {
 
 if ($hasDump -and -not $SkipDocker) {
     Write-Host "Fast path: restoring Docker database from dump..."
-    powershell -ExecutionPolicy Bypass -File scripts/restore_tpch_dump.ps1 -DumpFile $DumpFile
+    Invoke-CheckedCommand -Description "Dump restore" -Command {
+        powershell -ExecutionPolicy Bypass -File scripts/restore_tpch_dump.ps1 -DumpFile $DumpFile
+    }
     Write-Host "Pipeline complete via dump restore."
     exit 0
 }
@@ -40,17 +64,30 @@ $cleanDir = "data/clean/sf$Scale"
 $validationReport = "reports/validation_sf$Scale.json"
 
 Write-Host "Generating TPC-H SF$Scale..."
-python scripts/generate_tpch_duckdb.py --sf $Scale --out-dir $rawDir --force
+Invoke-CheckedCommand -Description "TPC-H generation" -Command {
+    & $pythonExe scripts/generate_tpch_duckdb.py --sf $Scale --out-dir $rawDir --force
+}
 
 Write-Host "Cleaning TPC-H SF$Scale..."
-python scripts/clean_tpch.py --input-dir $rawDir --output-dir $cleanDir --force
+Invoke-CheckedCommand -Description "TPC-H cleaning" -Command {
+    & $pythonExe scripts/clean_tpch.py --input-dir $rawDir --output-dir $cleanDir --force
+}
 
 Write-Host "Validating cleaned data SF$Scale..."
-python scripts/validate_tpch.py --input-dir $cleanDir --report $validationReport
+$metadataPath = Join-Path $rawDir "generation_metadata.json"
+Invoke-CheckedCommand -Description "TPC-H validation" -Command {
+    & $pythonExe scripts/validate_tpch.py --input-dir $cleanDir --report $validationReport --metadata $metadataPath
+}
 
 if (-not $SkipDocker) {
     Write-Host "Loading into Dockerized Postgres..."
-    powershell -ExecutionPolicy Bypass -File scripts/load_to_postgres.ps1 -Scale $Scale
+    Invoke-CheckedCommand -Description "Postgres load" -Command {
+        powershell -ExecutionPolicy Bypass -File scripts/load_to_postgres.ps1 -Scale $Scale
+    }
 }
 
 Write-Host "Pipeline complete for SF$Scale"
+}
+finally {
+    Pop-Location
+}

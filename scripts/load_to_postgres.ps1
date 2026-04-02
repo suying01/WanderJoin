@@ -32,7 +32,7 @@ docker compose -f $ComposeFile cp "sql/schema_tpch.sql" "postgres:/tmp/schema_tp
 docker compose -f $ComposeFile cp "sql/verification_query.sql" "postgres:/tmp/verification_query.sql" | Out-Null
 
 Write-Host "Applying schema..."
-docker compose -f $ComposeFile exec -T postgres psql -U $env:POSTGRES_USER -d $env:POSTGRES_DB -f /tmp/schema_tpch.sql
+docker compose -f $ComposeFile exec -T postgres psql -v ON_ERROR_STOP=1 -U $env:POSTGRES_USER -d $env:POSTGRES_DB -f /tmp/schema_tpch.sql
 
 Write-Host "Copying cleaned data into container..."
 docker compose -f $ComposeFile exec -T postgres mkdir -p /tmp/tpch/sf$Scale
@@ -56,11 +56,11 @@ $copySql | Out-File -FilePath $copySqlPath -Encoding utf8
 
 docker compose -f $ComposeFile cp $copySqlPath "postgres:/tmp/copy_tpch.sql" | Out-Null
 
-docker compose -f $ComposeFile exec -T postgres psql -U $env:POSTGRES_USER -d $env:POSTGRES_DB -f /tmp/copy_tpch.sql
+docker compose -f $ComposeFile exec -T postgres psql -v ON_ERROR_STOP=1 -U $env:POSTGRES_USER -d $env:POSTGRES_DB -f /tmp/copy_tpch.sql
 
 Remove-Item $copySqlPath -Force
 
 Write-Host "Running verification query..."
-docker compose -f $ComposeFile exec -T postgres psql -U $env:POSTGRES_USER -d $env:POSTGRES_DB -f /tmp/verification_query.sql
+docker compose -f $ComposeFile exec -T postgres psql -v ON_ERROR_STOP=1 -U $env:POSTGRES_USER -d $env:POSTGRES_DB -f /tmp/verification_query.sql
 
 Write-Host "Load complete for SF$Scale."

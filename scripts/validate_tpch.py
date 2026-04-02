@@ -93,6 +93,11 @@ def parse_args() -> argparse.Namespace:
         default="reports/validation_sf1.json",
         help="Validation report JSON output path (default: reports/validation_sf1.json)",
     )
+    parser.add_argument(
+        "--metadata",
+        default="",
+        help="Optional generation_metadata.json path for row-count consistency checks",
+    )
     return parser.parse_args()
 
 
@@ -112,6 +117,17 @@ def query_scalar_int(con: duckdb.DuckDBPyConnection, sql: str) -> int:
     if row is None:
         raise RuntimeError(f"Query returned no rows: {sql}")
     return int(row[0])
+
+
+def infer_metadata_path(input_dir: Path) -> Path:
+    # data/clean/sfX -> data/raw/sfX/generation_metadata.json
+    try:
+        data_dir = input_dir.parent.parent
+        if input_dir.parent.name == "clean" and data_dir.name == "data":
+            return data_dir / "raw" / input_dir.name / "generation_metadata.json"
+    except IndexError:
+        pass
+    return Path("")
 
 
 def main() -> None:
@@ -194,16 +210,41 @@ def main() -> None:
         "SELECT COUNT(*) FROM lineitem l LEFT JOIN supplier s ON l.l_suppkey = s.s_suppkey WHERE s.s_suppkey IS NULL;",
     )
 
+    metadata_path = Path(args.metadata).resolve() if args.metadata else infer_metadata_path(input_dir)
+    metadata_row_counts = {}
+    metadata_mismatches = {}
+    if metadata_path and metadata_path.exists():
+        with open(metadata_path, "r", encoding="utf-8") as fp:
+            metadata = json.load(fp)
+
+        if isinstance(metadata, dict) and isinstance(metadata.get("tables"), dict):
+            for table in TABLES:
+                expected_raw = metadata["tables"].get(table)
+                if expected_raw is None:
+                    continue
+                expected = int(expected_raw)
+                actual = int(row_counts[table])
+                metadata_row_counts[table] = expected
+                if actual != expected:
+                    metadata_mismatches[table] = {"expected": expected, "actual": actual}
+
     con.close()
+
+    status = "pass"
+    if any(v != 0 for v in pk_checks.values()) or any(v != 0 for v in fk_checks.values()):
+        status = "fail"
+    if metadata_mismatches:
+        status = "fail"
 
     report = {
         "input_dir": str(input_dir),
         "row_counts": row_counts,
         "pk_duplicate_groups": pk_checks,
         "fk_missing_rows": fk_checks,
-        "status": "pass"
-        if all(v == 0 for v in pk_checks.values()) and all(v == 0 for v in fk_checks.values())
-        else "fail",
+        "metadata_path": str(metadata_path) if metadata_path and metadata_path.exists() else None,
+        "metadata_row_counts": metadata_row_counts,
+        "metadata_mismatches": metadata_mismatches,
+        "status": status,
     }
 
     with open(report_path, "w", encoding="utf-8") as fp:
@@ -211,6 +252,8 @@ def main() -> None:
 
     print(f"Validation status: {report['status']}")
     print(f"Report: {report_path}")
+    if report["status"] != "pass":
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

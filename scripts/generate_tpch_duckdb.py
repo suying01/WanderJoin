@@ -52,6 +52,8 @@ def main() -> None:
 
     start = time.time()
     db_path = out_dir / f"tpch_sf{args.sf}.duckdb"
+    if db_path.exists():
+        db_path.unlink()
 
     con = duckdb.connect(str(db_path))
     con.execute("INSTALL tpch;")
