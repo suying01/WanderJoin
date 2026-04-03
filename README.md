@@ -25,6 +25,7 @@ Not included yet:
 - `reports/.gitkeep`: placeholder for validation outputs
 
 Note: generated datasets and local DB artifacts are intentionally ignored by Git. (Very large files)
+Note: the shared SF5 parquet file is available on Google Drive: https://drive.google.com/file/d/1RJuN50Dl_PdfzuyUEoNx-n4YQjN0Mvd6/view?usp=sharing
 
 ## Prerequisites
 
@@ -32,38 +33,29 @@ Note: generated datasets and local DB artifacts are intentionally ignored by Git
 - PowerShell 5.1+
 - Docker Desktop
 
-## Choose One Setup Path
+## Setup (SF5 parquet file)
 
-### Path A (Fastest): Restore From Shared Dump
-
-Use this if you received `tpch_sf5.dump` from the Data Lead.
-
-Google Drive download link: https://drive.google.com/file/d/1PYgIMOsjSiQiR_UDs3ROvJqQr6oBR0Z5/view?usp=sharing
-
-1. Download `tpch_sf5.dump` from Google Drive.
-2. Run:
+Use this default command:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/run_data_lead_pipeline.ps1 -DumpFile ".\tpch_sf5.dump"
-```
-
-What this does:
-- Starts Docker PostgreSQL
-- Restores the dump
-- Runs row-count verification
-
-### Path B (Fully Reproducible): Regenerate Everything
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/run_data_lead_pipeline.ps1 -Scale 5
+powershell -ExecutionPolicy Bypass -File scripts/run_data_lead_pipeline.ps1 -Scale 5 -SkipDocker -ExportParquet
 ```
 
 What this does:
 - Generates TPC-H SF5 raw files
 - Cleans `.tbl` files
 - Validates data integrity (PK/FK and generated-vs-cleaned row count consistency)
-- Loads data to Docker PostgreSQL
-- Runs row-count verification
+- Exports parquet files to `data/clean/sf5/parquet`
+
+Typical runtime on SF5: several minutes, depending on CPU/disk speed.
+
+If you only need parquet data (no local regeneration), download the shared SF5 parquet file from Google Drive and place it under `data/clean/sf5/parquet`.
+
+If you also need Docker PostgreSQL loaded, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run_data_lead_pipeline.ps1 -Scale 5
+```
 
 ## Manual Commands (Fallback)
 
@@ -85,13 +77,16 @@ python scripts/clean_tpch.py --input-dir data/raw/sf5 --output-dir data/clean/sf
 # 4) Validate cleaned files
 python scripts/validate_tpch.py --input-dir data/clean/sf5 --report reports/validation_sf5.json --metadata data/raw/sf5/generation_metadata.json
 
-# 5) Load into Docker PostgreSQL
+# 5) Export parquet files
+python scripts/export_tpch_parquet.py --input-dir data/clean/sf5 --output-dir data/clean/sf5/parquet --force
+
+# 6) Load into Docker PostgreSQL (optional)
 powershell -ExecutionPolicy Bypass -File scripts/load_to_postgres.ps1 -Scale 5
 ```
 
 ## Verify Data Loaded Correctly
 
-Run this command after Path A or Path B:
+Run this command after Docker load:
 
 ```powershell
 docker compose exec -T postgres psql -U postgres -d amazon_reviews -c "SELECT 'region' AS table_name, COUNT(*) AS row_count FROM region UNION ALL SELECT 'nation', COUNT(*) FROM nation UNION ALL SELECT 'supplier', COUNT(*) FROM supplier UNION ALL SELECT 'customer', COUNT(*) FROM customer UNION ALL SELECT 'part', COUNT(*) FROM part UNION ALL SELECT 'partsupp', COUNT(*) FROM partsupp UNION ALL SELECT 'orders', COUNT(*) FROM orders UNION ALL SELECT 'lineitem', COUNT(*) FROM lineitem ORDER BY table_name;"
