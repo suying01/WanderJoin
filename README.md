@@ -5,15 +5,19 @@ Included:
 - Data cleaning
 - Data validation
 - Local Docker PostgreSQL load/restore
+- Wander Join random walk engine (index builder + sampling)
 
 Not included yet:
-- Wander Join algorithm implementation
-- AWS Lambda orchestration
+- Horvitz-Thompson estimator (math lead)
+- Multiprocessing / AWS Lambda orchestration (cloud architect)
 - Final report visualization code
 
 ## Project Layout
 
-- `scripts/`: all automation scripts
+- `scripts/build_indexes.py`: loads TPC-H .tbl files and builds in-memory join indexes
+- `scripts/wander_join.py`: core random walk engine (Customer -> Orders -> LineItem)
+- `scripts/test_walk.py`: sanity-check script that runs walks and prints weighted average
+- `scripts/`: all other automation scripts (generation, cleaning, validation, loading)
 - `sql/`: schema and verification SQL
 - `docker-compose.yml`: PostgreSQL service
 - `data/raw/.gitkeep`: placeholder for generated raw files
@@ -103,9 +107,62 @@ Expected SF5 row counts:
 - `orders`: 7,500,000
 - `lineitem`: 29,999,795
 
+## Wander Join Algorithm
+
+The Wander Join implementation samples from the join path **Customer -> Orders -> LineItem** using random walks (Li et al., SIGMOD 2016).
+
+### Quick Start (no Docker needed)
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Generate and clean TPC-H SF1 data (~1GB)
+python scripts/generate_tpch_duckdb.py --sf 1 --out-dir data/raw/sf1
+python scripts/clean_tpch.py --input-dir data/raw/sf1 --output-dir data/clean/sf1
+
+# Run 10,000 random walks
+cd scripts && python test_walk.py --data-dir ../data/clean/sf1
+```
+
+### How It Works
+
+1. **`build_indexes.py`** reads the `.tbl` files and builds two `defaultdict(list)` indexes:
+   - `orders_by_custkey[custkey]` -> list of order dicts
+   - `lineitems_by_orderkey[orderkey]` -> list of lineitem dicts
+
+2. **`wander_join.py`** performs random walks:
+   - Pick a random customer -> look up their orders -> pick one -> look up its line items -> pick one
+   - If a step has no matches, the walk is a **dead end** (returns `None`)
+   - Each successful walk returns `{'value': extendedprice, 'weight': fanout}` where `weight = len(orders) * len(lineitems)` — the product of choices at each join step
+
+3. The **weight** is critical for the Horvitz-Thompson estimator: it corrects for the non-uniform probability of reaching each join tuple. Without it, customers with fewer orders would be overrepresented.
+
+### Importing in Other Modules
+
+```python
+from build_indexes import load_and_index
+from wander_join import run_walks
+
+customers, orders_idx, lineitems_idx = load_and_index("data/clean/sf1")
+results = run_walks(n_walks=50000, customers=customers,
+                    orders_idx=orders_idx, lineitems_idx=lineitems_idx)
+# results: list of {'value': float, 'weight': int}
+```
+
+### Expected Output (SF1, 10k walks)
+
+```
+Successful walks : ~6,600
+Dead ends        : ~3,400 (33.9%)
+Raw weighted avg : ~$38,000
+```
+
+The ~34% dead-end rate is expected — SF1 has 150k customers but only ~100k have orders.
+
 ## Role-Based
 
 - Data Lead: owns generation, cleaning, validation, and local DB preparation.
-- Algorithm Engineer: consumes cleaned/loaded TPC-H tables for random walk logic.
-- Cloud Architect: focuses on AWS setup; local Docker path is optional fallback.
-- Analytics and Math Lead: uses validated counts and loaded tables for estimator/CI evaluation.
+- Algorithm Engineer: owns `build_indexes.py`, `wander_join.py`, and `test_walk.py`.
+- Cloud Architect: focuses on AWS setup; will wrap `run_walks()` in Lambda handler.
+- Analytics and Math Lead: plugs into `run_walks()` output to build Horvitz-Thompson estimator and confidence intervals.
