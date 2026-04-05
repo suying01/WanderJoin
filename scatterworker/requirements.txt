@@ -1,0 +1,5 @@
+numpy<2.0.0
+duckdb
+pandas
+fsspec
+s3fs

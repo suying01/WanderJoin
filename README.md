@@ -6,10 +6,10 @@ Included:
 - Data validation
 - Local Docker PostgreSQL load/restore
 - Wander Join random walk engine (index builder + sampling)
+- Multiprocessing / AWS Lambda orchestration (cloud architect)
 
 Not included yet:
 - Horvitz-Thompson estimator (math lead)
-- Multiprocessing / AWS Lambda orchestration (cloud architect)
 - Final report visualization code
 
 ## Project Layout
@@ -17,7 +17,9 @@ Not included yet:
 - `scripts/build_indexes.py`: loads TPC-H .tbl files and builds in-memory join indexes
 - `scripts/wander_join.py`: core random walk engine (Customer -> Orders -> LineItem)
 - `scripts/test_walk.py`: sanity-check script that runs walks and prints weighted average
+- `scripts/gather.py`: AWS Lambda orchestration script for scatter walk
 - `scripts/`: all other automation scripts (generation, cleaning, validation, loading)
+- `scatterworker/`: AWS Lambda function for scatter walk
 - `sql/`: schema and verification SQL
 - `docker-compose.yml`: PostgreSQL service
 - `data/raw/.gitkeep`: placeholder for generated raw files
@@ -154,6 +156,81 @@ Raw weighted avg : ~$38,000
 ```
 
 The ~34% dead-end rate is expected — SF1 has 150k customers but only ~100k have orders.
+
+## Multiprocessing / AWS Lambda Orchestration
+This system utilizes a "Scatter-Gather" orchestration pattern.
+* **Storage:** Amazon S3 hosting TPC-H Parquet files.
+* **Compute Engine:** AWS Lambda running a custom Amazon Linux 2023 Docker container (Python 3.12).
+* **Database Engine:** DuckDB using the `httpfs` extension.
+* **Orchestrator:** A local Python script utilizing `concurrent.futures` and `boto3`.
+
+To replicate this experiment, you must configure your own AWS environment. 
+
+#### S3 Storage
+Create an S3 bucket in your deployment region and upload the 8 TPC-H tables as Parquet files (`customer.parquet`, `orders.parquet`, `lineitem.parquet`, etc.).
+
+#### IAM Execution Role
+Create an IAM Role for your Lambda function. Attach the managed `AWSLambdaBasicExecutionRole` policy, and create the following inline policy to grant DuckDB access to your specific bucket:
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": ["s3:ListBucket"],
+            "Resource": "arn:aws:s3:::<YOUR_BUCKET_NAME>"
+        },
+        {
+            "Effect": "Allow",
+            "Action": ["s3:GetObject"],
+            "Resource": "arn:aws:s3:::<YOUR_BUCKET_NAME>/*"
+        }
+    ]
+}
+```
+
+#### Docker Deployment (ECR)
+AWS Lambda requires a custom container to ensure `glibc` compatibility with DuckDB. Replace the placeholders below and run these commands to push the container to your Elastic Container Registry (ECR). 
+
+*(Note: If building on an Apple Silicon/M-Series Mac, the `--platform linux/amd64` flag is mandatory).*
+
+```bash
+# 1. Authenticate Docker with ECR
+aws ecr get-login-password --region <YOUR_AWS_REGION> | docker login --username AWS --password-stdin <YOUR_AWS_ACCOUNT_ID>.dkr.ecr.<YOUR_AWS_REGION>.amazonaws.com
+
+# 2. Build the image
+docker build --platform linux/amd64 -t wander-join-worker .
+
+# 3. Tag the image
+docker tag wander-join-worker:latest <YOUR_AWS_ACCOUNT_ID>.dkr.ecr.<YOUR_AWS_REGION>[.amazonaws.com/wander-join-worker:latest](https://.amazonaws.com/wander-join-worker:latest)
+
+# 4. Push to ECR
+docker push <YOUR_AWS_ACCOUNT_ID>.dkr.ecr.<YOUR_AWS_REGION>[.amazonaws.com/wander-join-worker:latest](https://.amazonaws.com/wander-join-worker:latest)
+```
+
+#### Lambda Configuration
+Create a new Lambda function from the uploaded Container Image. **You must immediately update the default configuration:**
+* **Memory:** `2048 MB` (Critical for S3 network I/O speed).
+* **Timeout:** `3 min 0 sec`.
+
+#### Local Execution
+
+Before running the orchestrator, export your AWS IAM User credentials to your local environment so `boto3` can authenticate the Lambda invocations:
+
+```bash
+export AWS_ACCESS_KEY_ID="<YOUR_IAM_ACCESS_KEY>"
+export AWS_SECRET_ACCESS_KEY="<YOUR_IAM_SECRET_KEY>"
+export AWS_DEFAULT_REGION="<YOUR_AWS_REGION>"
+```
+
+#### Running the Orchestrator
+Inside `scripts/gather.py`, you can tune `NUM_WORKERS` to scale horizontally. Ensure `WALKS_PER_WORKER` stays low enough (e.g., 100) to avoid cloud execution timeouts.
+
+```bash
+python gather.py
+```
+
 
 ## Role-Based
 
