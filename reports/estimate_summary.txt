@@ -1,0 +1,18 @@
+WANDER JOIN - HORVITZ-THOMPSON ESTIMATOR SUMMARY
+======================================================================
+
+Samples collected: 21,292
+
+Point Estimates:
+  Mean per row:        $38,146.93
+  Total (estimated):   $3,434,056,154,087.12
+
+Accuracy Metrics:
+  Standard error:      $192.78
+  95% Confidence interval: [$37,769.08, $38,524.78]
+  Margin of error (±): $377.85
+  Relative error:      0.505%
+
+Stopping Condition (95% CI, ±1% rel. error):
+  Relative Error: 0.0099 (target: 0.0100) — ✓ STOP
+  Status: ✓ MET

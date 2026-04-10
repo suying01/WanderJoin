@@ -6,17 +6,19 @@ Included:
 - Data validation
 - Local Docker PostgreSQL load/restore
 - Wander Join random walk engine (index builder + sampling)
+- **Horvitz-Thompson estimator** (unbiased aggregate estimation with confidence intervals)
+- **Adaptive stopping condition** (95% CI with ±1% relative error threshold)
+- **Visualizations** (convergence, distributions, accuracy metrics)
 - Multiprocessing / AWS Lambda orchestration (cloud architect)
-
-Not included yet:
-- Horvitz-Thompson estimator (math lead)
-- Final report visualization code
 
 ## Project Layout
 
 - `scripts/build_indexes.py`: loads TPC-H .tbl files and builds in-memory join indexes
 - `scripts/wander_join.py`: core random walk engine (Customer -> Orders -> LineItem)
 - `scripts/test_walk.py`: sanity-check script that runs walks and prints weighted average
+- `scripts/horvitz_thompson_estimator.py`: **Horvitz-Thompson ratio estimator with 95% confidence intervals & stopping condition**
+- `scripts/visualizations.py`: **Chart generation (convergence, distributions, error decay)**
+- `scripts/analyze_wanderjoin.py`: **Complete end-to-end workflow with adaptive stopping** (recommended entry point)
 - `scripts/gather.py`: AWS Lambda orchestration script for scatter walk
 - `scripts/`: all other automation scripts (generation, cleaning, validation, loading)
 - `scatterworker/`: AWS Lambda function for scatter walk
@@ -145,6 +147,88 @@ customers, orders_idx, lineitems_idx = load_and_index("data/clean/sf1")
 results = run_walks(n_walks=50000, customers=customers,
                     orders_idx=orders_idx, lineitems_idx=lineitems_idx)
 # results: list of {'value': float, 'weight': int}
+```
+
+## Horvitz-Thompson Estimator & Analysis
+
+### Overview
+
+The Horvitz-Thompson ratio estimator converts random walk samples into **unbiased aggregate estimates** with **95% confidence intervals**. The stopping condition automatically determines when sufficient accuracy (±1% relative error) is achieved.
+
+**Key insight:** Each sample is weighted by the fanout product, which ensures that tuples reached through high-fanout paths are correctly downweighted in the final estimate.
+
+### Mathematical Foundation
+
+Given samples with values $v_i$ and weights $w_i$:
+
+$$\hat{\mu} = \frac{\sum v_i w_i}{\sum w_i}$$
+
+The variance is estimated via the delta method:
+
+$$\widehat{\text{Var}}(\hat{\mu}) \approx \frac{1}{(\sum w_i)^2} \sum w_i^2 (v_i - \hat{\mu})^2$$
+
+The **stopping condition** checks if the margin of error meets the target:
+
+$$\text{Margin of Error} = 1.96 \cdot \sigma(\hat{\mu}) < \epsilon \cdot |\hat{\mu}|$$
+
+For 95% confidence and ±1% relative error: $\epsilon = 0.01$.
+
+### End-to-End Analysis (Recommended)
+
+Run the complete workflow with adaptive batch sampling and automatic stopping:
+
+```bash
+python scripts/analyze_wanderjoin.py \
+  --data-dir data/clean/sf1 \
+  --batch-size 2000 \
+  --max-batches 50 \
+  --rel-error-threshold 0.01 \
+  --output-dir reports
+```
+
+**Output:**
+- Console report with convergence statistics
+- `reports/estimate_summary.txt`: point estimates and confidence intervals
+- `reports/01_value_distribution.png`: histogram of sampled extended prices
+- `reports/02_weight_distribution.png`: fanout weight distribution (linear & log scale)
+
+### Programmatic Usage
+
+```python
+from horvitz_thompson_estimator import HorvitzThompsonEstimator
+
+# Initialize with estimated population size
+pop_size = len(customers) * avg_orders_per_cust * avg_items_per_order
+estimator = HorvitzThompsonEstimator(population_size=pop_size)
+
+# Add samples from walks
+estimator.add_samples(walk_results)
+
+# Check accuracy
+point_estimate = estimator.estimate_mean()
+total_estimate = estimator.estimate_total()
+ci_lower, ci_upper, moe = estimator.confidence_interval_95()
+
+# Check stopping condition (95% CI, ±1% relative error)
+should_stop, reason = estimator.should_stop_sampling(rel_error_threshold=0.01)
+print(f"Relative Error: {estimator.coefficient_of_variation()*100:.3f}%")
+print(reason)
+```
+
+## Report Visualization
+
+Generate publication-quality charts:
+
+```python
+from visualizations import WanderJoinVisualizer
+
+visualizer = WanderJoinVisualizer()
+
+# Value distribution (what gets sampled)
+visualizer.plot_value_distribution(values, output_file="reports/values.png")
+
+# Weight distribution (fanout variance)
+visualizer.plot_weight_distribution(weights, output_file="reports/weights.png")
 ```
 
 ### Expected Output (SF1, 10k walks)
