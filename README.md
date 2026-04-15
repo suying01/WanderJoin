@@ -18,7 +18,8 @@ Included:
 - `scripts/test_walk.py`: sanity-check script that runs walks and prints weighted average
 - `scripts/horvitz_thompson_estimator.py`: **Horvitz-Thompson ratio estimator with 95% confidence intervals & stopping condition**
 - `scripts/visualizations.py`: **Chart generation (convergence, distributions, error decay)**
-- `scripts/analyze_wanderjoin.py`: **Complete end-to-end workflow with adaptive stopping** (recommended entry point)
+- `scripts/analyze_wanderjoin.py`: **Complete end-to-end workflow with adaptive stopping** (recommended entry point for local execution)
+- `scripts/analyze_wanderjoin_cloud.py`: **Complete end-to-end workflow with adaptive stopping** (recommended entry point for cloud execution)
 - `scripts/gather.py`: AWS Lambda orchestration script for scatter walk
 - `scripts/`: all other automation scripts (generation, cleaning, validation, loading)
 - `scatterworker/`: AWS Lambda function for scatter walk
